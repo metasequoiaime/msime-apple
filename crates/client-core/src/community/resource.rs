@@ -178,6 +178,9 @@ impl CommunityResourceApi for BackendAccountClient {
         id: Uuid,
         token: Option<&str>,
     ) -> Result<CommunityResource, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         let value = self.json_with_limit::<CommunityResource, ()>(
             Method::GET,
             &format!("/v1/community/resources/{}", id.hyphenated()),
@@ -292,6 +295,9 @@ impl CommunityResourceApi for BackendAccountClient {
         saved: bool,
         token: &str,
     ) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         #[derive(Serialize)]
         struct Body {
             saved: bool,
@@ -344,6 +350,9 @@ impl CommunityResourceApi for BackendAccountClient {
     }
 
     fn delete_community_resource(&self, id: Uuid, token: &str) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct ResultBody {
@@ -391,6 +400,9 @@ where
     }
 
     pub fn detail(&self, id: Uuid) -> Result<CommunityResource, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(false, |api, token| api.community_resource(id, token))
     }
 
@@ -429,6 +441,9 @@ where
     }
 
     pub fn save(&self, id: Uuid, saved: bool) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(true, |api, token| {
             api.save_community_resource(id, saved, token.ok_or(AccountError::Unauthorized)?)
         })
@@ -441,6 +456,9 @@ where
     }
 
     pub fn delete(&self, id: Uuid) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(true, |api, token| {
             api.delete_community_resource(id, token.ok_or(AccountError::Unauthorized)?)
         })
@@ -627,6 +645,7 @@ fn encode_query(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
 
     #[test]
     fn resource_query_preserves_utf8_and_scope() {
@@ -655,5 +674,28 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn resource_api_rejects_nil_ids_before_transport() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let client = BackendAccountClient::loopback(&origin).unwrap();
+        assert!(matches!(
+            CommunityResourceApi::community_resource(&client, Uuid::nil(), None),
+            Err(AccountError::Invalid)
+        ));
+        assert!(matches!(
+            CommunityResourceApi::save_community_resource(&client, Uuid::nil(), true, "fixture"),
+            Err(AccountError::Invalid)
+        ));
+        assert!(matches!(
+            CommunityResourceApi::delete_community_resource(&client, Uuid::nil(), "fixture"),
+            Err(AccountError::Invalid)
+        ));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
     }
 }
