@@ -185,6 +185,57 @@ fn online_provider_forwards_the_ai_cache_probe_flag() {
 
 #[cfg(unix)]
 #[test]
+fn online_provider_deduplicates_before_enforcing_source_quota() {
+    let directory = private_tempdir();
+    let socket = directory.path().join("online.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(stream.try_clone().unwrap()),
+            &mut line,
+        )
+        .unwrap();
+        std::io::Write::write_all(
+            &mut stream,
+            "{\"candidates\":[{\"text\":\"重复\",\"source\":1},{\"text\":\"重复\",\"source\":1},{\"text\":\"甲\",\"source\":1},{\"text\":\"乙\",\"source\":1}]}\n".as_bytes(),
+        )
+        .unwrap();
+    });
+    let query: OnlineQuery = serde_json::from_value(json!({
+        "scheme": 0,
+        "generation": 1,
+        "identity": "identity",
+        "query_text": "nihao",
+        "cache_key": "cache",
+        "pinyin_segments": ["ni", "hao"],
+        "cloud_eligible": true,
+        "cloud_candidates": false,
+        "ai_eligible": true,
+        "session_id": 5,
+        "ai_assistant": {
+            "enabled": true,
+            "provider": "synthetic",
+            "model": "synthetic-model",
+            "endpoint": "https://ai.invalid/v1/chat/completions",
+            "candidate_limit": 3
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        UnixSocketProvider::new(socket).query_candidates(query),
+        Some(vec![
+            ("重复".to_owned(), 1),
+            ("甲".to_owned(), 1),
+            ("乙".to_owned(), 1),
+        ])
+    );
+    server.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn translation_provider_rejects_controls_at_the_socket_boundary() {
     let directory = private_tempdir();
     let request_socket = directory.path().join("translation-request.sock");
