@@ -76,8 +76,15 @@ pub struct CloudCandidateState {
 
 impl CloudCandidateState {
     pub fn update(&mut self, enabled: bool, input: &str) -> Option<(u64, String)> {
-        self.generation = self.generation.wrapping_add(1);
         self.input.clear();
+        // Once the identity space is exhausted, do not wrap and let an old
+        // request become indistinguishable from a newer one.  Clearing the
+        // input above also invalidates the request that used the final
+        // generation, so no result can be applied after exhaustion.
+        if self.generation == u64::MAX {
+            return None;
+        }
+        self.generation += 1;
         if !enabled
             || input.is_empty()
             || input.len() > MAX_INPUT
@@ -178,6 +185,20 @@ mod tests {
         assert_eq!(state.apply(new, "你好"), Some("你好".into()));
         assert!(state.apply(new, &"字".repeat(513)).is_none());
         assert!(state.apply(new, "好\n").is_none());
+    }
+
+    #[test]
+    fn generation_exhaustion_does_not_reuse_request_ids() {
+        let mut state = CloudCandidateState {
+            generation: u64::MAX - 1,
+            input: "old".into(),
+        };
+        let (last, _) = state.update(true, "last").unwrap();
+        assert_eq!(last, u64::MAX);
+        assert_eq!(state.apply(last, "结果"), Some("结果".into()));
+
+        assert!(state.update(true, "new").is_none());
+        assert!(state.apply(last, "过期").is_none());
     }
 
     #[test]
