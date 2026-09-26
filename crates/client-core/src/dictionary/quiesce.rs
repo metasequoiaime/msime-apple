@@ -7,6 +7,8 @@
 //! On Windows every input session lives in the one Server process, which releases them when asked over its auxiliary pipe instead (see [`server`]). The Server does not track who asked, so one writer's resume can hand the sessions back while another is still working; that writer's next request then finds the dictionaries busy, asks again and is retried like the first.
 
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,6 +20,23 @@ pub const RETRY_BUDGET: Duration = Duration::from_millis(2500);
 pub const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 /// The host API's reason when an input session holds the dictionaries.
 pub const BUSY: &str = "dictionary maintenance busy";
+/// The native lease reader consumes at most 31 bytes. Keep a generous bound
+/// for the owner line while preventing a corrupt lease from causing an
+/// unbounded allocation when a writer is dropped.
+const MAX_LEASE_BYTES: u64 = 4096;
+
+fn read_lease(path: &Path) -> Option<String> {
+    let mut bytes = Vec::new();
+    File::open(path)
+        .ok()?
+        .take(MAX_LEASE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_LEASE_BYTES {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
 
 #[cfg(windows)]
 use server::ServerRelease as Release;
@@ -77,7 +96,7 @@ impl Lease {
 impl Drop for Lease {
     /// Remove the lease only while it is still the one this writer last wrote. When another writer has replaced it since, that writer's work is still running under it, and removing it would let the hosts reopen their sessions in the middle of it. The read and the removal are not one step, so a replacement landing between them is still removed; the other writer puts it back on its next request.
     fn drop(&mut self) {
-        if std::fs::read_to_string(&self.path).is_ok_and(|current| current == self.written) {
+        if read_lease(&self.path).is_some_and(|current| current == self.written) {
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -253,6 +272,14 @@ mod tests {
         assert!(lease_expiry(directory.path()).is_some());
         drop(second);
         assert!(!directory.path().join(LEASE_NAME).exists());
+    }
+
+    #[test]
+    fn an_oversized_lease_is_ignored_without_reading_it_unboundedly() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(LEASE_NAME);
+        std::fs::write(&path, vec![b'x'; MAX_LEASE_BYTES as usize + 1]).unwrap();
+        assert_eq!(read_lease(&path), None);
     }
 
     #[test]
