@@ -781,8 +781,8 @@ pub fn refresh_host_options(path: &std::path::Path) -> Result<bool, Box<dyn std:
     if !metadata.is_file() {
         return Ok(false);
     }
-    if metadata.len() > 16384 {
-        return Err("runtime options exceed 16 KiB".into());
+    if metadata.len() > HOST_OPTIONS_DOCUMENT_LIMIT as u64 {
+        return Err("runtime options exceed 1 MiB".into());
     }
     let document: Value = serde_json::from_slice(&std::fs::read(path)?)?;
     let specification: ResourceSet = serde_json::from_str(include_str!(

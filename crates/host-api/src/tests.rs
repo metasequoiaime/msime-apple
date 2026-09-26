@@ -5753,6 +5753,41 @@ fn current_or_unfamiliar_options_are_not_prepared() {
 }
 
 #[test]
+fn refresh_accepts_full_sized_options_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    let mut preferences = Preferences::default();
+    preferences.custom_touch_keyboard_skin.photo =
+        Some(format!("iVBORw0KGgoA{}", "AAAA".repeat(10_000)));
+    preferences.validate().unwrap();
+    let generation = serde_json::from_str::<ResourceSet>(include_str!(
+        "../../../resources/desktop-dictionary.lock.json"
+    ))
+    .unwrap()
+    .generation()
+    .unwrap();
+    let document = serde_json::json!({
+        "api_version": 1,
+        "resources": "/resources",
+        "user_data": state.join("user"),
+        "cache": state.join("cache"),
+        "dictionaries": state.join("user").join("dictionaries").join(generation),
+        "preferences_directory": state,
+        "preferences": preferences,
+    });
+    let options = directory.path().join("runtime-options.json");
+    let encoded = serde_json::to_vec(&document).unwrap();
+    assert!(encoded.len() > 16_384);
+    assert!(encoded.len() <= HOST_OPTIONS_DOCUMENT_LIMIT);
+    std::fs::write(&options, encoded).unwrap();
+
+    // A custom keyboard photo can make a valid HostOptions document much larger than 16 KiB.
+    // A current generation is deliberately used so this test exercises only the file-size gate.
+    assert!(!refresh_host_options(&options).unwrap());
+}
+
+#[test]
 fn a_failed_preparation_is_reported_and_incomplete_output_rejected() {
     let stale = json!({
         "resources": "/r",
