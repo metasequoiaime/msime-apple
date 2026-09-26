@@ -113,6 +113,9 @@ impl CommunitySkinApi for BackendAccountClient {
     }
 
     fn community_skin(&self, id: Uuid, token: Option<&str>) -> Result<CommunitySkin, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         let path = format!("/v1/community/skins/{}", id.hyphenated());
         let skin = self.json::<CommunitySkin, ()>(Method::GET, &path, token, None)?;
         validate_skin(&skin)?;
@@ -127,6 +130,9 @@ impl CommunitySkinApi for BackendAccountClient {
         id: Uuid,
         token: &str,
     ) -> Result<TouchKeyboardSkinDesign, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         let path = format!("/v1/community/skins/{}/download", id.hyphenated());
         let result =
             self.json::<CommunitySkinDownload, ()>(Method::POST, &path, Some(token), None)?;
@@ -137,7 +143,7 @@ impl CommunitySkinApi for BackendAccountClient {
     }
 
     fn rate_community_skin(&self, id: Uuid, stars: u8, token: &str) -> Result<(), AccountError> {
-        if !(1..=5).contains(&stars) {
+        if id.is_nil() || !(1..=5).contains(&stars) {
             return Err(AccountError::Invalid);
         }
         #[derive(Serialize)]
@@ -185,6 +191,9 @@ impl CommunitySkinApi for BackendAccountClient {
     }
 
     fn unpublish_community_skin(&self, id: Uuid, token: &str) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         let path = format!("/v1/community/skins/{}", id.hyphenated());
         let result = self.json::<CommunitySkinUnpublishResponse, ()>(
             Method::DELETE,
@@ -223,17 +232,23 @@ where
     }
 
     pub fn detail(&self, id: Uuid) -> Result<CommunitySkin, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(false, |api, token| api.community_skin(id, token))
     }
 
     pub fn download(&self, id: Uuid) -> Result<TouchKeyboardSkinDesign, AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(true, |api, token| {
             api.download_community_skin(id, token.ok_or(AccountError::Unauthorized)?)
         })
     }
 
     pub fn rate(&self, id: Uuid, stars: u8) -> Result<(), AccountError> {
-        if !(1..=5).contains(&stars) {
+        if id.is_nil() || !(1..=5).contains(&stars) {
             return Err(AccountError::Invalid);
         }
         self.request(true, |api, token| {
@@ -261,6 +276,9 @@ where
     }
 
     pub fn unpublish(&self, id: Uuid) -> Result<(), AccountError> {
+        if id.is_nil() {
+            return Err(AccountError::Invalid);
+        }
         self.request(true, |api, token| {
             api.unpublish_community_skin(id, token.ok_or(AccountError::Unauthorized)?)
         })
@@ -568,6 +586,10 @@ mod tests {
         let api = FakeApi::default();
         let session = Arc::new(BackendAccountSession::new(api.clone(), storage.clone()));
         let service = BackendCommunitySkinService::new(api.clone(), session);
+        assert_eq!(service.detail(Uuid::nil()), Err(AccountError::Invalid));
+        assert_eq!(service.download(Uuid::nil()), Err(AccountError::Invalid));
+        assert_eq!(service.rate(Uuid::nil(), 5), Err(AccountError::Invalid));
+        assert_eq!(service.unpublish(Uuid::nil()), Err(AccountError::Invalid));
         assert_eq!(service.download(skin().id), Err(AccountError::Unauthorized));
         assert_eq!(service.rate(skin().id, 0), Err(AccountError::Invalid));
         assert_eq!(api.skin_calls.load(Ordering::SeqCst), 0);
