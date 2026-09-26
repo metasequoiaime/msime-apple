@@ -211,6 +211,13 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_client_NativeClient_mobileClipboardH
 JNIEXPORT jbyteArray JNICALL Java_app_msime_client_NativeClient_doubaoDecodeFrameRaw(JNIEnv *env, jclass, jbyteArray frame) {
     if (!frame) return response(env, msime_client_doubao_decode_frame(nullptr, 0));
     jsize length = env->GetArrayLength(frame);
+    // The shared decoder rejects frames above one MiB. Check before asking JNI for a native view:
+    // GetByteArrayElements may copy the entire Java array, so doing this after the call briefly
+    // doubles an attacker-controlled oversized response and defeats the decoder's allocation
+    // bound.
+    if (length > 1024 * 1024) {
+        return response(env, msime_client_doubao_decode_frame(nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(frame, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_doubao_decode_frame(
