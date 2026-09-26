@@ -106,7 +106,8 @@ static bool argumentInt32(napi_env env, napi_value value, int32_t &out) {
     return napi_get_value_int32(env, value, &out) == napi_ok;
 }
 
-static bool argumentArrayBuffer(napi_env env, napi_value value, std::vector<uint8_t> &out) {
+static bool argumentArrayBuffer(napi_env env, napi_value value, std::vector<uint8_t> &out,
+                               size_t maximum = std::numeric_limits<size_t>::max()) {
     bool is_array_buffer = false;
     if (napi_is_arraybuffer(env, value, &is_array_buffer) != napi_ok || !is_array_buffer) return false;
     void *data = nullptr;
@@ -114,6 +115,10 @@ static bool argumentArrayBuffer(napi_env env, napi_value value, std::vector<uint
     if (napi_get_arraybuffer_info(env, value, &data, &length) != napi_ok) return false;
     // N-API may expose a zero-length ArrayBuffer with a null data pointer. Empty PCM is a
     // legitimate final audio frame, so only require storage when there are bytes to copy.
+    // Check the byte length before copying.  The callers that decode provider frames have a
+    // one-megabyte protocol limit; copying an untrusted ArrayBuffer first would let a malformed
+    // bridge call allocate an arbitrary amount of native memory before it is rejected.
+    if (length > maximum) return false;
     if (length == 0) {
         out.clear();
         return true;
@@ -822,11 +827,12 @@ static napi_value DoubaoEncodeFrame(napi_env env, napi_callback_info info) {
     int32_t flags = 0;
     int32_t sequence = 0;
     std::vector<uint8_t> payload;
+    constexpr size_t kMaxFramePayload = 1024 * 1024;
     if (!arguments(env, info, 4, argv) || !argumentInt32(env, argv[0], message_type)
             || !argumentInt32(env, argv[1], flags) || !argumentInt32(env, argv[2], sequence)
-            || !argumentArrayBuffer(env, argv[3], payload)
+            || !argumentArrayBuffer(env, argv[3], payload, kMaxFramePayload)
             || message_type < 0 || message_type > 15 || flags < 0 || flags > 15
-            || payload.size() > 1024 * 1024) {
+            || payload.size() > kMaxFramePayload) {
         return invalid(env, "Invalid Doubao frame");
     }
     std::vector<uint8_t> compressed;
@@ -863,7 +869,8 @@ static napi_value nullValue(napi_env env) {
 static napi_value DoubaoDecodeFrame(napi_env env, napi_callback_info info) {
     std::vector<napi_value> argv;
     std::vector<uint8_t> frame;
-    if (!arguments(env, info, 1, argv) || !argumentArrayBuffer(env, argv[0], frame)
+    constexpr size_t kMaxFrameBytes = 1024 * 1024;
+    if (!arguments(env, info, 1, argv) || !argumentArrayBuffer(env, argv[0], frame, kMaxFrameBytes)
             || frame.size() < 12 || frame.size() > 1024 * 1024 || frame[0] != 0x11
             || (frame[1] >> 4) != 0x09 || frame[2] != 0x11) return nullValue(env);
     const uint8_t flags = frame[1] & 0x0f;
