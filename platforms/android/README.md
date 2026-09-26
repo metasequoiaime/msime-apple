@@ -144,7 +144,7 @@ Android 账号设置中的云词典现通过同一认证会话访问 HTTPS API�
 
 配置缺失、原生库不可用或输入连接错误会显示状态并退回直接输入。服务从应用私有 files 目录读取 `runtime-options.json`，路径必须指向已在设备上准备的词库与私有用户目录，不能复制 macOS 的配置路径。开发 APK 的启动页提供首次资源准备。
 
-本地检查：`ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/check-host.sh`。需要 JDK 17+、Android API 35 和 build-tools 35.0.0，以及 `rg`（缺它会让脚本里所有 `if rg` 守卫静默通过，因此脚本直接拒绝运行）。脚本先逐条比对 Android 侧与 `crates/host-api/src/ffi/input.rs` 的共享命令契约，再用 `javac --release 17 -Xlint:all -Werror` 编译不依赖 Android 框架的那部分宿主 Java（排除 `java/app/msime/client/home/` 与任何 import AndroidX/Material 的文件——那些是 AAR，只有 Gradle 能解析），执行 71 个不依赖 Android 运行时的策略冒烟，并用 `aapt2 compile` 校验 manifest/resource；中间资源包随临时目录清理，不作为 APK 交付。
+本地检查：`ANDROID_SDK_ROOT=<SDK绝对路径> bash platforms/android/check-host.sh`。需要 JDK 17+、Android API 35 和 build-tools 35.0.0，以及 `rg`（缺它会让脚本里所有 `if rg` 守卫静默通过，因此脚本直接拒绝运行）。脚本先逐条比对 Android 侧与 `crates/host-api/src/ffi/input.rs` 的共享命令契约，再用 `javac --release 17 -Xlint:all -Werror` 编译不依赖 Android 框架的那部分宿主 Java（排除 `java/app/msime/client/home/` 与任何 import AndroidX/Material 的文件——那些是 AAR，只有 Gradle 能解析），执行 72 个不依赖 Android 运行时的策略冒烟，并用 `aapt2 compile` 校验 manifest/resource；中间资源包随临时目录清理，不作为 APK 交付。
 
 JVM 冒烟只覆盖无 Android 依赖的策略层；焦点、选区、编辑器动作和进程生命周期由下面「专用模拟器验收」一节的 instrumentation 覆盖。React 设置页的 Android 合包与验证见下文。
 

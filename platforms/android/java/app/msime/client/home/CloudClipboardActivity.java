@@ -17,6 +17,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.android.material.textfield.TextInputEditText;
 import app.msime.client.BackendAccount;
+import app.msime.client.clipboard.CloudClipboardTextPolicy;
 import app.msime.client.R;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,8 +66,8 @@ public final class CloudClipboardActivity extends AppCompatActivity {
 
     private void add() {
         String text = draft.getText() == null ? "" : draft.getText().toString();
-        if (text.trim().isEmpty() || text.length() > 10_000) {
-            status.setText("请输入不超过 10,000 个字符的内容");
+        if (!CloudClipboardTextPolicy.valid(text)) {
+            status.setText("请输入有效且不超过 4,000 个 UTF-16 单元的内容");
             return;
         }
         run(() -> { new BackendAccount(this).addClipboard(text); return null; }, ignored -> {
