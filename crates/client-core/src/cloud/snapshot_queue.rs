@@ -80,7 +80,8 @@ impl SnapshotQueueState {
                 .as_deref()
                 .is_some_and(|value| !valid_local_version(value))
             || self.request.as_ref().is_some_and(|request| {
-                request.account_id.is_empty()
+                request.id.is_nil()
+                    || request.account_id.is_empty()
                     || request.account_id.len() > 128
                     || request.cloud_revision < 0
                     || !valid_local_version(&request.expected_local_version)
@@ -633,6 +634,30 @@ mod tests {
         fs::write(root.join(STATE_NAME), b"{not-json").unwrap();
         assert!(matches!(queue.read(), Err(SnapshotQueueError::Invalid)));
         assert_eq!(fs::read(root.join(STATE_NAME)).unwrap(), b"{not-json");
+    }
+
+    #[test]
+    fn queue_rejects_a_persisted_request_with_a_nil_id() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        let initial = version("legacy", 'a');
+        let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
+        queue.publish_local_version(&initial).unwrap();
+        let state = SnapshotQueueState {
+            version: 1,
+            local_version: Some(initial.clone()),
+            request: Some(SnapshotRequest {
+                id: Uuid::nil(),
+                account_id: "fixture".into(),
+                cloud_revision: 1,
+                expected_local_version: initial,
+                file_sha256: "a".repeat(64),
+                status: SnapshotRequestStatus::Queued,
+            }),
+        };
+        fs::write(root.join(STATE_NAME), serde_json::to_vec(&state).unwrap()).unwrap();
+
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Invalid)));
     }
 
     #[test]
