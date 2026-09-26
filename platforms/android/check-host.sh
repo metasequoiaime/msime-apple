@@ -185,6 +185,14 @@ if ! rg -q 'NativeClient\.doubaoStartFrame|NativeClient\.doubaoAudioFrame' \
   echo "Android streaming recognition must build its frames through the shared Host API" >&2
   exit 1
 fi
+# Reject an oversized response before JNI obtains a native view of the Java byte array. The shared
+# decoder has the same one-megabyte wire bound, but checking after GetByteArrayElements can briefly
+# duplicate an untrusted oversized WebSocket message.
+if ! rg -q 'if \(length > 1024 \* 1024\)' \
+    "$repo_root/platforms/android/native/client_jni.cpp"; then
+  echo "Android Doubao decoding must bound the Java frame before copying" >&2
+  exit 1
+fi
 # The Engine decides what a punctuation key produces, so the Chinese/English state has to reach it.
 # A toggle that only changed this keyboard's key faces would show one mark and commit the other.
 if ! rg -q 'setChinesePunctuationRaw' \
