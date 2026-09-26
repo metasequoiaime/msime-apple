@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONObject;
+import app.msime.client.clipboard.CloudClipboardTextPolicy;
 
 /**
  * 水杉账号：登录方式、挑战、登录、以及本机保存的会话。
@@ -160,7 +161,7 @@ public final class BackendAccount {
             String id = item.optString("id", "");
             String text = item.optString("text", "");
             String updated = item.optString("updated_at", "");
-            if (!id.matches("[0-9a-f]{64}") || text.isEmpty() || text.length() > 10_000
+            if (!id.matches("[0-9a-f]{64}") || !CloudClipboardTextPolicy.valid(text)
                     || updated.isEmpty() || updated.length() > 128
                     || updated.chars().anyMatch(Character::isISOControl))
                 throw new IllegalStateException("invalid clipboard response");
@@ -177,8 +178,7 @@ public final class BackendAccount {
 
     public ClipboardItem addClipboard(String text) throws Exception {
         String token = accessToken();
-        if (token.isEmpty() || text == null || text.trim().isEmpty() || text.length() > 10_000
-                || text.getBytes(StandardCharsets.UTF_8).length > 40_000)
+        if (token.isEmpty() || !CloudClipboardTextPolicy.valid(text))
             throw new IllegalStateException("invalid clipboard request");
         JSONObject item = request("POST", "/v1/users/me/clipboard", new JSONObject().put("text", text), token);
         String id = item.optString("id", "");
