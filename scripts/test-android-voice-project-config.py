@@ -195,6 +195,8 @@ class AndroidVoiceProjectConfigurationTests(unittest.TestCase):
         self.assertIn("NativeClient.doubaoStartFrame(", recognizer)
         self.assertIn("NativeClient.doubaoAudioFrame(", recognizer)
         self.assertIn("NativeClient.doubaoDecodeFrame(", recognizer)
+        self.assertIn("MAX_INBOUND_FRAME_BYTES = 1_048_576 + 10", recognizer)
+        self.assertIn("if (pending == inbound.length) return null;", recognizer)
         # Cancelling has to release both the microphone and the socket.
         self.assertIn("streaming.cancel()", activity)
         self.assertIn("socket.close()", recognizer)
