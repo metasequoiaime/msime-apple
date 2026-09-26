@@ -17,6 +17,11 @@ def main() -> int:
             "if (session !== this.sessionId || this.resultHandler === undefined)" in voice,
         "voice creation releases a late engine":
             "created.shutdown();" in voice,
+        "voice errors stop the write-audio capture":
+            "const handler: VoiceErrorHandler | undefined = this.errorHandler;" in voice
+            and "this.cancelSystemSession();" in voice
+            and "this.resultHandler = undefined;" in voice
+            and "this.errorHandler = undefined;" in voice,
         "voice tone closes raw file after player creation failure":
             "let rawFdOpen: boolean = false;" in behaviour
             and "rawFdOpen = true;" in behaviour
