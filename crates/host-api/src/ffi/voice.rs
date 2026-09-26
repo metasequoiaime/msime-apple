@@ -36,11 +36,14 @@ unsafe fn write_doubao_frame(
     output_capacity: usize,
     output_length: *mut usize,
 ) -> bool {
-    if output.is_null() || output_length.is_null() {
+    // A null, zero-capacity output is the sizing probe used by mobile bindings. Report the
+    // required length before returning false so the caller can allocate exactly one frame. A null
+    // output with nonzero capacity is still an invalid destination and must not be accepted.
+    if output_length.is_null() || (output.is_null() && output_capacity != 0) {
         return false;
     }
     *output_length = frame.len();
-    if frame.len() > output_capacity {
+    if output_capacity < frame.len() {
         return false;
     }
     std::ptr::copy_nonoverlapping(frame.as_ptr(), output, frame.len());
