@@ -27,18 +27,22 @@ pub struct VoiceSessionState {
 
 impl VoiceSessionState {
     pub fn start(&mut self) -> u64 {
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
-            // Generation zero is the inactive sentinel used by the provider
-            // lease protocol; never expose it after integer wraparound.
-            self.generation = 1;
+        // Generation zero is the inactive sentinel used by the provider lease
+        // protocol. Once the identity space is exhausted, refuse to start a
+        // new session instead of wrapping and accepting an old result.
+        if self.generation == u64::MAX {
+            self.active = false;
+            return 0;
         }
+        self.generation += 1;
         self.active = true;
         self.generation
     }
 
     pub fn cancel(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
+        // Keep the exhausted generation at its terminal value. Wrapping to
+        // zero and then starting at one would eventually reuse an old token.
+        self.generation = self.generation.saturating_add(1);
         self.active = false;
     }
 
@@ -70,12 +74,18 @@ mod tests {
     }
 
     #[test]
-    fn starting_after_generation_wrap_skips_zero() {
+    fn generation_exhaustion_does_not_reuse_voice_ids() {
         let mut state = VoiceSessionState {
-            generation: u64::MAX,
+            generation: u64::MAX - 1,
             active: false,
         };
-        assert_eq!(state.start(), 1);
+        let last = state.start();
+        assert_eq!(last, u64::MAX);
         assert!(state.is_active());
+
+        state.cancel();
+        assert_eq!(state.start(), 0);
+        assert!(!state.is_active());
+        assert!(state.apply(last, "过期").is_none());
     }
 }
