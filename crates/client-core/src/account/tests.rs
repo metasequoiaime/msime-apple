@@ -590,6 +590,26 @@ fn late_refresh_cannot_restore_forgotten_session() {
 }
 
 #[test]
+fn generation_exhaustion_refuses_async_account_operations() {
+    let storage = MemoryStorage::default();
+    installed(&storage, 0);
+    let session = BackendAccountSession::new(FakeApi::new(), storage);
+    session.set_generation_for_test(u64::MAX - 1);
+
+    assert_eq!(
+        session.sign_in("synthetic-challenge", "123456"),
+        Err(AccountError::Unavailable)
+    );
+    session.set_generation_for_test(u64::MAX);
+    assert_eq!(
+        session.access_token(Some(&token(b'a'))),
+        Err(AccountError::Unavailable)
+    );
+    session.forget().unwrap();
+    assert_eq!(session.status().unwrap(), None);
+}
+
+#[test]
 fn logout_clears_local_session_before_remote_result() {
     let storage = MemoryStorage::default();
     installed(&storage, u64::MAX);
