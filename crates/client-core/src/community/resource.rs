@@ -645,6 +645,7 @@ fn encode_query(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
 
     #[test]
     fn resource_query_preserves_utf8_and_scope() {
@@ -677,7 +678,10 @@ mod tests {
 
     #[test]
     fn resource_api_rejects_nil_ids_before_transport() {
-        let client = BackendAccountClient::new().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let client = BackendAccountClient::loopback(&origin).unwrap();
         assert!(matches!(
             CommunityResourceApi::community_resource(&client, Uuid::nil(), None),
             Err(AccountError::Invalid)
@@ -690,5 +694,8 @@ mod tests {
             CommunityResourceApi::delete_community_resource(&client, Uuid::nil(), "fixture"),
             Err(AccountError::Invalid)
         ));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
     }
 }
