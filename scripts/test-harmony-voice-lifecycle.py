@@ -33,8 +33,16 @@ def main() -> int:
         "late main panel is destroyed":
             "await engine.destroyPanel(panel);" in ability,
         "toolbar creation checks teardown":
-            "const toolbar: inputMethodEngine.Panel = await engine.createPanel" in ability
+            "toolbar = await engine.createPanel" in ability
             and "await engine.destroyPanel(toolbar);" in ability,
+        "status panel creation is generation-fenced":
+            "private statusPanelGeneration: number = 0;" in ability
+            and "const generation: number = ++this.statusPanelGeneration;" in ability
+            and "this.openToolbar(generation)" in ability
+            and "this.openModeBadge(generation)" in ability,
+        "status panel failures clean up their own panel":
+            "let toolbar: inputMethodEngine.Panel | undefined = undefined;" in ability
+            and "let hud: inputMethodEngine.Panel | undefined = undefined;" in ability,
     }
     problems = [name for name, present in checks.items() if not present]
     if problems:

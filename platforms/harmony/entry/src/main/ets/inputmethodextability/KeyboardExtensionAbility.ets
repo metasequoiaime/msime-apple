@@ -78,6 +78,10 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   // The bar that says what mode the keyboard is in. Another window of its own, because it outlives
   // every composition and every editor: it is on screen whenever the keyboard is running at all.
   private toolbar: inputMethodEngine.Panel | undefined = undefined;
+  // Preferences can be reloaded again while a STATUS_BAR panel is still being created. The
+  // generation fences those awaits so an obsolete request cannot leak a panel or tear down the
+  // panel belonging to a newer request.
+  private statusPanelGeneration: number = 0;
   private toolbarPosition: [number, number] = [0, 0];
   // Set while the toolbar is hidden because the focused editor's window fills the screen.
   private toolbarHiddenForFullscreen: boolean = false;
@@ -126,14 +130,15 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
    * The width is computed from the same layout the page draws with, so a hidden button narrows the
    * bar rather than leaving a gap where it was.
    */
-  private async resizeToolbar(density: number): Promise<void> {
-    if (this.toolbar === undefined) {
+  private async resizeToolbar(density: number,
+                              panel: inputMethodEngine.Panel | undefined = this.toolbar): Promise<void> {
+    if (panel === undefined) {
       return;
     }
     const session: KeyboardSession = KeyboardSession.shared;
     const count: number = FloatingToolbarLayout.buttons(session.toolbarComponents()).length;
     const scale: number = session.toolbarScale();
-    await this.toolbar.resize(
+    await panel.resize(
       Math.round(FloatingToolbarLayout.widthVp(count) * scale * density),
       Math.round(FloatingToolbarLayout.heightVp() * scale * density));
   }
@@ -146,6 +151,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
    * Run at creation and again whenever the settings page changes the preferences, so turning the toolbar on or off takes effect without restarting the input method, as the Windows host's config sync does. Whatever is to be closed is closed before anything is opened, since the grant has to be free first.
    */
   private async reconcileStatusPanels(): Promise<void> {
+    const generation: number = ++this.statusPanelGeneration;
     const session: KeyboardSession = KeyboardSession.shared;
     const wantToolbar: boolean = session.toolbarEnabled();
     const wantBadge: boolean = !wantToolbar && session.modeBadgeEnabled();
@@ -156,44 +162,45 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       this.closeModeBadge();
     }
     if (wantToolbar && this.toolbar === undefined) {
-      await this.openToolbar();
+      await this.openToolbar(generation);
+      if (generation !== this.statusPanelGeneration) return;
     } else if (this.toolbar !== undefined) {
       await this.resizeToolbar(this.density);
+      if (generation !== this.statusPanelGeneration) return;
       session.refreshToolbar();
     }
     if (wantBadge && this.hud === undefined) {
-      await this.openModeBadge();
+      await this.openModeBadge(generation);
     }
   }
 
-  private async openToolbar(): Promise<void> {
+  private async openToolbar(generation: number): Promise<void> {
+    let toolbar: inputMethodEngine.Panel | undefined = undefined;
     try {
-      const toolbar: inputMethodEngine.Panel = await engine.createPanel(this.context, {
+      toolbar = await engine.createPanel(this.context, {
         type: inputMethodEngine.PanelType.STATUS_BAR
       });
-      if (this.tornDown) {
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(toolbar);
+        return;
+      }
+      await toolbar.setUiContent('keyboard/FloatingToolbar');
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
         await engine.destroyPanel(toolbar);
         return;
       }
       this.toolbar = toolbar;
-      await toolbar.setUiContent('keyboard/FloatingToolbar');
-      if (this.tornDown) {
-        if (this.toolbar === toolbar) {
-          this.toolbar = undefined;
-          await engine.destroyPanel(toolbar);
-        }
-        return;
-      }
       KeyboardSession.shared.onToolbarDragStart = (): void => {
         this.beginToolbarDrag();
       };
       KeyboardSession.shared.onToolbarDrag = (offsetX: number, offsetY: number): void => {
         this.dragToolbar(offsetX, offsetY);
       };
-      await this.resizeToolbar(this.density);
-      if (this.tornDown) {
-        if (this.toolbar === toolbar) {
-          this.toolbar = undefined;
+      await this.resizeToolbar(this.density, toolbar);
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        // A newer reconciliation may have adopted this panel. Leave it to that call (or
+        // teardown) rather than destroying the panel it now owns.
+        if (this.toolbar !== toolbar) {
           await engine.destroyPanel(toolbar);
         }
         return;
@@ -208,21 +215,25 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       const margin: number = TOOLBAR_MARGIN_VP * this.density;
       this.toolbarPosition = [Math.round(this.screenWidth - width - margin),
         Math.round(this.screenHeight - height - margin * 4)];
-      await this.toolbar.moveTo(this.toolbarPosition[0], this.toolbarPosition[1]);
-      if (this.tornDown) {
-        if (this.toolbar === toolbar) {
-          this.toolbar = undefined;
+      await toolbar.moveTo(this.toolbarPosition[0], this.toolbarPosition[1]);
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        if (this.toolbar !== toolbar) {
           await engine.destroyPanel(toolbar);
         }
         return;
       }
-      await this.toolbar.show();
+      await toolbar.show();
     } catch (error) {
       KeyboardLog.error(`toolbar unavailable: ${describeError(error)}`);
-      if (this.toolbar !== undefined) {
-        engine.destroyPanel(this.toolbar);
+      if (toolbar !== undefined
+        && (generation === this.statusPanelGeneration || this.toolbar !== toolbar)) {
+        if (this.toolbar === toolbar) {
+          this.toolbar = undefined;
+          KeyboardSession.shared.onToolbarDragStart = undefined;
+          KeyboardSession.shared.onToolbarDrag = undefined;
+        }
+        engine.destroyPanel(toolbar);
       }
-      this.toolbar = undefined;
     }
   }
 
@@ -237,33 +248,37 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     this.toolbarHiddenForFullscreen = false;
   }
 
-  private async openModeBadge(): Promise<void> {
+  private async openModeBadge(generation: number): Promise<void> {
+    let hud: inputMethodEngine.Panel | undefined = undefined;
     try {
-      const hud: inputMethodEngine.Panel = await engine.createPanel(this.context, {
+      hud = await engine.createPanel(this.context, {
         type: inputMethodEngine.PanelType.STATUS_BAR
       });
-      if (this.tornDown) {
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(hud);
+        return;
+      }
+      await hud.setUiContent('keyboard/InputModeHud');
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
         await engine.destroyPanel(hud);
         return;
       }
       this.hud = hud;
-      await hud.setUiContent('keyboard/InputModeHud');
-      if (this.tornDown) {
-        if (this.hud === hud) {
-          this.hud = undefined;
-          await engine.destroyPanel(hud);
-        }
-        return;
-      }
       await hud.resize(Math.round(HUD_WIDTH_VP * this.density),
         Math.round(HUD_HEIGHT_VP * this.density));
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        if (this.hud !== hud) {
+          await engine.destroyPanel(hud);
+        }
+      }
     } catch (error) {
       // Worth saying but not worth failing over: the keyboard types perfectly well without a badge, and refusing to start because a piece of feedback would not build helps nobody.
       KeyboardLog.error(`mode badge unavailable: ${describeError(error)}`);
-      if (this.hud !== undefined) {
-        engine.destroyPanel(this.hud);
+      if (hud !== undefined
+        && (generation === this.statusPanelGeneration || this.hud !== hud)) {
+        if (this.hud === hud) this.hud = undefined;
+        engine.destroyPanel(hud);
       }
-      this.hud = undefined;
     }
   }
 
@@ -977,6 +992,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
 
   /** Undoes everything onCreate installed. Safe to run twice: a failed onCreate and then onDestroy. */
   private teardown(): void {
+    this.statusPanelGeneration += 1;
     this.tornDown = true;
     this.pending = undefined;
     engine.off('inputStart', this.started);
