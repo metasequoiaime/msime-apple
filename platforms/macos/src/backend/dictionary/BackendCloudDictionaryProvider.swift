@@ -215,7 +215,14 @@ final class BackendCloudDictionaryProvider: NSObject {
   @objc func request(_ request: NSDictionary, completion: @escaping (NSDictionary) -> Void) -> Progress {
     let progress = Progress(totalUnitCount: 1)
     let task = Task {
-      do { completion(["ok":true, "value":try await execute(request)]) }
+      do {
+        // Progress.cancel() marks the progress synchronously but invokes its
+        // cancellation handler asynchronously. Check that flag before entering
+        // execute so a request cancelled before this task is scheduled never
+        // fetches credentials or starts network I/O.
+        guard !progress.isCancelled else { throw CancellationError() }
+        completion(["ok":true, "value":try await execute(request)])
+      }
       catch let failure as BackendAccountClient.Failure { completion(["ok":false, "error":failure.status == 409 ? "conflict" : "unavailable"]) }
       catch { completion(["ok":false, "error":"unavailable"]) }
       progress.completedUnitCount = 1; progress.cancellationHandler = nil
