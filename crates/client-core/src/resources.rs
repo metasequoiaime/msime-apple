@@ -256,6 +256,10 @@ impl ResourceStore {
 
 /// Where the Engine looks for helpcode tables, relative to the resource directory (`helpcodes/…` in its asset contract).
 const HELPCODE_DIRECTORY: &str = "helpcodes";
+/// Verification markers are generated locally and contain only the pinned
+/// artifact names and metadata. Keep a corrupt or replaced marker from
+/// allocating without bound before it is discarded as a cache miss.
+const MAX_MARKER_BYTES: u64 = 64 * 1024;
 
 fn describe(kind: std::fs::FileType) -> &'static str {
     if kind.is_dir() {
@@ -401,7 +405,16 @@ impl VerifiedMarker {
     /// A marker that is absent, unreadable or not the shape this version writes is simply a miss:
     /// the caller hashes, and writes a fresh one.
     pub fn read(path: &Path) -> Option<Self> {
-        serde_json::from_slice(&fs::read(path).ok()?).ok()
+        let mut bytes = Vec::new();
+        File::open(path)
+            .ok()?
+            .take(MAX_MARKER_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if bytes.len() as u64 > MAX_MARKER_BYTES {
+            return None;
+        }
+        serde_json::from_slice(&bytes).ok()
     }
 
     pub fn write(&self, path: &Path) -> Result<(), ResourceError> {
@@ -672,5 +685,12 @@ mod tests {
             .unwrap();
         marker.write(&path).unwrap();
         assert_eq!(VerifiedMarker::read(&path), Some(marker), "round trips");
+
+        fs::write(&path, vec![b' '; MAX_MARKER_BYTES as usize + 1]).unwrap();
+        assert_eq!(
+            VerifiedMarker::read(&path),
+            None,
+            "oversized markers are cache misses"
+        );
     }
 }
