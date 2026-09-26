@@ -187,7 +187,8 @@ impl KeyboardSkinTrialStore {
             return Err(KeyboardSkinTrialError::Invalid);
         }
         let record: TrialRecord = serde_json::from_slice(&bytes)?;
-        if normalized_name(&record.name)? != record.name
+        if record.id.is_nil()
+            || normalized_name(&record.name)? != record.name
             || !record.design.validate()
             || !record.previous_design.validate()
         {
@@ -307,5 +308,27 @@ mod tests {
             fs::read(root.path().join("KeyboardSkinTrial.json")).unwrap(),
             before
         );
+    }
+
+    #[test]
+    fn a_pending_record_with_a_nil_id_is_rejected() {
+        let (root, _preferences, trials) = stores();
+        let record = TrialRecord {
+            id: Uuid::nil(),
+            name: "合成试用".into(),
+            previous_skin: TouchKeyboardSkin::Forest,
+            previous_design: TouchKeyboardSkinDesign::default(),
+            design: TouchKeyboardSkinDesign::default(),
+        };
+        fs::write(
+            root.path().join("KeyboardSkinTrial.json"),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            trials.restore_pending(),
+            Err(KeyboardSkinTrialError::Invalid)
+        ));
     }
 }
