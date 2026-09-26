@@ -33,7 +33,7 @@ def main() -> int:
         "late main panel is destroyed":
             "await engine.destroyPanel(panel);" in ability,
         "toolbar creation checks teardown":
-            "const toolbar: inputMethodEngine.Panel = await engine.createPanel" in ability
+            "toolbar = await engine.createPanel" in ability
             and "await engine.destroyPanel(toolbar);" in ability,
     }
     problems = [name for name, present in checks.items() if not present]
