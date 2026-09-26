@@ -277,14 +277,18 @@ impl UnixSocketProvider {
             {
                 continue;
             }
+            // A provider may repeat a candidate while merging multiple backends. Duplicates do
+            // not occupy a slot in the runtime, so discard them before enforcing the per-source
+            // quota; otherwise one repeated value can hide a distinct candidate that still fits.
+            if candidates.iter().any(|(text, _)| text == &reply.text) {
+                continue;
+            }
             let source = usize::from(reply.source);
             source_counts[source] += 1;
             if source_counts[source] > limits[source] {
                 return None;
             }
-            if !candidates.iter().any(|(text, _)| text == &reply.text) {
-                candidates.push((reply.text, reply.source));
-            }
+            candidates.push((reply.text, reply.source));
         }
         Some(candidates)
     }
