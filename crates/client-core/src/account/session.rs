@@ -67,6 +67,24 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         self.state.lock().map_err(|_| AccountError::Unavailable)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_generation_for_test(&self, generation: u64) {
+        self.state.lock().unwrap().generation = generation;
+    }
+
+    /// Reserve an identity for an operation that may complete asynchronously.
+    /// The terminal value is never handed to such an operation: once it is
+    /// reached, there is no later value available to invalidate it on logout.
+    fn next_generation(state: &mut SessionState) -> Result<u64, AccountError> {
+        let next = state
+            .generation
+            .checked_add(1)
+            .filter(|&generation| generation < u64::MAX)
+            .ok_or(AccountError::Unavailable)?;
+        state.generation = next;
+        Ok(next)
+    }
+
     fn load_locked(&self, state: &mut SessionState) -> Result<(), AccountError> {
         if !state.loaded {
             let saved = self.storage.load()?;
@@ -122,9 +140,9 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
     ) -> Result<AccountUser, AccountError> {
         let version = {
             let mut state = self.lock()?;
-            state.generation = state.generation.wrapping_add(1);
+            let version = Self::next_generation(&mut state)?;
             state.refresh = None;
-            state.generation
+            version
         };
         let tokens = self.api.login(challenge, credential)?;
         validate_tokens(&tokens)?;
@@ -154,6 +172,9 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
                 let flight = Arc::clone(flight);
                 drop(state);
                 return flight.wait();
+            }
+            if state.generation == u64::MAX {
+                return Err(AccountError::Unavailable);
             }
             let version = state.generation;
             let refresh_token = current.tokens.refresh_token.clone();
@@ -530,7 +551,10 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
 
     pub fn forget(&self) -> Result<(), AccountError> {
         let mut state = self.lock()?;
-        state.generation = state.generation.wrapping_add(1);
+        // No asynchronous operation can be running at the terminal value:
+        // next_generation refuses to issue it there. Keep the value stable
+        // while still clearing the account state.
+        state.generation = state.generation.saturating_add(1);
         state.refresh = None;
         state.saved = None;
         state.loaded = true;
