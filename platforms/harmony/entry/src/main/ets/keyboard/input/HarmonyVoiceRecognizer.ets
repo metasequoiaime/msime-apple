@@ -123,9 +123,15 @@ export class HarmonyVoiceRecognizer {
           if (session === this.sessionId) this.deliver(config, this.lastResultText, true);
         },
         onError: (session: string, code: number, message: string): void => {
-          if (session === this.sessionId && this.errorHandler !== undefined) {
-            this.errorHandler(`语音识别失败（${code}）`);
-          }
+          if (session !== this.sessionId) return;
+          // CoreSpeechKit errors are terminal for the write-audio session. Stop the capturer
+          // before notifying the view; otherwise the view becomes idle while this recognizer
+          // continues to hold the microphone and every subsequent start is rejected as busy.
+          const handler: VoiceErrorHandler | undefined = this.errorHandler;
+          this.cancelSystemSession();
+          this.resultHandler = undefined;
+          this.errorHandler = undefined;
+          if (handler !== undefined) handler(`语音识别失败（${code}）`);
         }
       });
     }
