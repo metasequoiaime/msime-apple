@@ -27,6 +27,11 @@ def main() -> int:
             and "rawFdOpen = true;" in behaviour
             and "if (rawFdOpen)" in behaviour
             and "await context.resourceManager.closeRawFd(asset);" in behaviour,
+        "voice tone cannot block recording forever":
+            "const TONE_PLAYBACK_TIMEOUT_MS: number = 3000;" in behaviour
+            and "let timeoutHandle: number | undefined = undefined;" in behaviour
+            and "clearTimeout(timeoutHandle);" in behaviour
+            and "voice tone playback timed out" in behaviour,
         "main panel creation checks teardown":
             "const panel: inputMethodEngine.Panel = await engine.createPanel" in ability
             and "if (this.tornDown) {" in ability,

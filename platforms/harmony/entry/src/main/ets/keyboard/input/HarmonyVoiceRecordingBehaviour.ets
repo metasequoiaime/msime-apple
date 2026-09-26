@@ -24,6 +24,10 @@ import { VoiceRecordingBehaviourPolicy } from './VoiceRecordingBehaviourPolicy';
 
 const START_TONE: string = 'audios/start.mp3';
 const END_TONE: string = 'audios/end.mp3';
+// A broken decoder or an audio service that never emits a terminal state must not hold the
+// recording lifecycle open forever. Releasing the player in the timeout's finally path also
+// closes the raw descriptor and lets the microphone start.
+const TONE_PLAYBACK_TIMEOUT_MS: number = 3000;
 
 export class HarmonyVoiceRecordingBehaviour {
   private context: common.Context | undefined = undefined;
@@ -93,31 +97,48 @@ export class HarmonyVoiceRecordingBehaviour {
       const created: media.AVPlayer = player;
       created.fdSrc = { fd: file.fd, offset: file.offset, length: file.length };
       await new Promise<void>((resolve: () => void): void => {
+        let finished: boolean = false;
+        let timeoutHandle: number | undefined = undefined;
+        const finish = (): void => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = undefined;
+          }
+          resolve();
+        };
         // Resolved from whichever comes first: the tone finishing, or the player giving up. Waiting
         // on only the former would hang the caller on a device that cannot decode the asset.
         created.on('stateChange', (state: string): void => {
           if (state === 'initialized') {
             created.prepare().catch((error: Object): void => {
               KeyboardLog.error(`voice tone would not prepare: ${describeError(error)}`);
-              resolve();
+              finish();
             });
             return;
           }
           if (state === 'prepared') {
             created.play().catch((error: Object): void => {
               KeyboardLog.error(`voice tone would not play: ${describeError(error)}`);
-              resolve();
+              finish();
             });
             return;
           }
           if (state === 'completed' || state === 'error' || state === 'stopped') {
-            resolve();
+            finish();
           }
         });
         created.on('error', (error: Object): void => {
           KeyboardLog.error(`voice tone failed: ${describeError(error)}`);
-          resolve();
+          finish();
         });
+        timeoutHandle = setTimeout((): void => {
+          KeyboardLog.error('voice tone playback timed out');
+          finish();
+        }, TONE_PLAYBACK_TIMEOUT_MS);
       });
     } catch (error) {
       KeyboardLog.error(`voice tone unavailable: ${describeError(error)}`);
