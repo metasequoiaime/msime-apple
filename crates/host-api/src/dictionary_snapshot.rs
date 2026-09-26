@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     ffi::{c_char, c_void},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -34,6 +34,7 @@ const BUFFER_LIMIT: usize = 65536;
 const REQUEST_LIMIT: usize = HOST_OPTIONS_DOCUMENT_LIMIT;
 const HANDLE_LIMIT: usize = 8;
 const ACTIVATION_RECEIPT_NAME: &str = ".msime-snapshot-activation";
+const MAX_ACTIVATION_RECEIPT_BYTES: u64 = 36;
 const MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_SNAPSHOT_LINE_BYTES: usize = 65_536;
 const MAX_SNAPSHOT_RECORDS: usize = 500_000;
@@ -751,11 +752,26 @@ fn valid_activation_id(value: &str) -> bool {
 
 fn activation_receipt(options: &EngineOptions) -> Result<Option<String>, &'static str> {
     let path = Path::new(&options.user_data).join(ACTIVATION_RECEIPT_NAME);
-    let value = match std::fs::read(path) {
-        Ok(value) => value,
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("snapshot activation receipt unavailable"),
     };
+    if file
+        .metadata()
+        .map_err(|_| "snapshot activation receipt unavailable")?
+        .len()
+        > MAX_ACTIVATION_RECEIPT_BYTES
+    {
+        return Err("invalid snapshot activation receipt");
+    }
+    let mut value = Vec::new();
+    file.take(MAX_ACTIVATION_RECEIPT_BYTES + 1)
+        .read_to_end(&mut value)
+        .map_err(|_| "snapshot activation receipt unavailable")?;
+    if value.len() as u64 > MAX_ACTIVATION_RECEIPT_BYTES {
+        return Err("invalid snapshot activation receipt");
+    }
     let value = std::str::from_utf8(&value).map_err(|_| "invalid snapshot activation receipt")?;
     if !valid_activation_id(value) {
         return Err("invalid snapshot activation receipt");
