@@ -100,7 +100,7 @@ final class CandidateTranslationStore {
       let task = Task { [weak self] in
         defer { self?.tasks[id] = nil }
         guard let glosses = try? await service.translate(words: missing, target: code) else { return }
-        guard self?.scope == scope else { return }
+        guard !Task.isCancelled, self?.scope == scope else { return }
         self?.absorb(code: code, words: missing, glosses: glosses)
       }
       tasks[id] = task
