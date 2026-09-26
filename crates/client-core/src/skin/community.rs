@@ -360,7 +360,8 @@ fn validate_page(page: &CommunitySkinPage) -> Result<(), AccountError> {
 }
 
 fn validate_skin(skin: &CommunitySkin) -> Result<(), AccountError> {
-    if !valid_text(&skin.name, 1, 32, false)
+    if skin.id.is_nil()
+        || !valid_text(&skin.name, 1, 32, false)
         || skin.name.trim() != skin.name
         || !valid_text(&skin.description, 0, 280, true)
         || !valid_text(&skin.author, 1, 128, false)
@@ -646,6 +647,9 @@ mod tests {
         );
         let mut value = skin();
         value.rating_average = f64::NAN;
+        assert_eq!(validate_skin(&value), Err(AccountError::Unavailable));
+        value = skin();
+        value.id = Uuid::nil();
         assert_eq!(validate_skin(&value), Err(AccountError::Unavailable));
         value = skin();
         value.downloads = MAXIMUM_JAVASCRIPT_INTEGER + 1;
