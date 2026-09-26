@@ -2944,7 +2944,7 @@ fn a_wubi_auto_commit_survives_a_failed_refresh() {
 }
 
 #[test]
-fn a_busy_provider_answers_the_newest_query_not_the_oldest() {
+fn a_busy_provider_keeps_only_the_newest_completed_result() {
     let query = |text: &str| OnlineQuery {
         scheme: 0,
         generation: 1,
@@ -2979,16 +2979,15 @@ fn a_busy_provider_answers_the_newest_query_not_the_oldest() {
         assert!(worker.submit(query(text)));
     }
     release.send(()).unwrap();
-    let mut answered = Vec::new();
+    let mut answered = None;
     for _ in 0..500 {
         if let Some(result) = worker.try_recv() {
-            answered.push(result.text);
-            if answered.len() == 2 {
-                break;
-            }
+            answered = Some(result.text);
+            break;
         }
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(answered, vec!["ni".to_owned(), "nihao".to_owned()]);
+    assert_eq!(answered, Some("nihao".to_owned()));
+    assert!(worker.try_recv().is_none());
     worker.shutdown();
 }
