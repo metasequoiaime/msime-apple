@@ -36,6 +36,8 @@ public final class DoubaoRecognizer {
     private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
     private static final int READ_TIMEOUT_MILLIS = 30_000;
     private static final int MAX_MILLIS = 60_000;
+    /** The shared Doubao decoder accepts one-megabyte wire frames; keep room for a WebSocket header. */
+    private static final int MAX_INBOUND_FRAME_BYTES = 1_048_576 + 10;
     /** Roughly 100 ms of 16 kHz mono PCM: small enough to stream, large enough not to thrash. */
     private static final int CHUNK_BYTES = 3200;
 
@@ -111,7 +113,7 @@ public final class DoubaoRecognizer {
     private String stream(AudioRecord recorder, InputStream in, OutputStream out, Listener listener)
             throws IOException {
         byte[] chunk = new byte[CHUNK_BYTES];
-        byte[] inbound = new byte[64 * 1024];
+        byte[] inbound = new byte[MAX_INBOUND_FRAME_BYTES];
         int pending = 0;
         int sequence = 1;
         int sent = 0;
@@ -132,6 +134,10 @@ public final class DoubaoRecognizer {
             // Drain whatever has arrived without blocking the next chunk; after the final frame
             // there is nothing left to send, so waiting for the answer is all that remains.
             while (in.available() > 0 || last) {
+                // A zero-length read is not a portable way to ask for more data. If a frame fills
+                // the bounded buffer without decoding, reject it instead of handing read() a zero
+                // count and silently ending the session with a partial transcript.
+                if (pending == inbound.length) return null;
                 int got = in.read(inbound, pending, inbound.length - pending);
                 if (got <= 0) return transcript;
                 pending += got;
