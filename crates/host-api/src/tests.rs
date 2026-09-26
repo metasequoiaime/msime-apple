@@ -177,6 +177,22 @@ fn doubao_frame_codec_is_available_through_c_abi() {
     assert_eq!(&start[..4], &[0x11, 0x11, 0x11, 0]);
     assert!(written > 12);
 
+    // Mobile bindings size their Java/ArkTS result from a null, zero-capacity probe.
+    let mut required = 0usize;
+    assert!(!unsafe {
+        msime_client_doubao_start_frame(
+            true,
+            false,
+            true,
+            b"table".as_ptr(),
+            5,
+            std::ptr::null_mut(),
+            0,
+            &mut required,
+        )
+    });
+    assert_eq!(required, written);
+
     let mut audio = vec![0u8; 1024];
     let mut audio_written = 0usize;
     assert!(unsafe {
@@ -191,6 +207,20 @@ fn doubao_frame_codec_is_available_through_c_abi() {
         )
     });
     assert_eq!(&audio[..4], &[0x11, 0x23, 0x11, 0]);
+
+    let mut audio_required = 0usize;
+    assert!(!unsafe {
+        msime_client_doubao_audio_frame(
+            2,
+            [0u8, 1, 2, 3].as_ptr(),
+            4,
+            true,
+            std::ptr::null_mut(),
+            0,
+            &mut audio_required,
+        )
+    });
+    assert_eq!(audio_required, audio_written);
 }
 
 #[test]
