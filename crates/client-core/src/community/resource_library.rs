@@ -105,7 +105,8 @@ impl CommunityResourceLibraryStore {
         let items: Vec<CommunityResource> = from_slice(&bytes)?;
         if items.len() > MAXIMUM_ITEMS
             || items.iter().any(|item| {
-                item.kind != CommunityResourceKind::Reply
+                item.id == Uuid::nil()
+                    || item.kind != CommunityResourceKind::Reply
                     || !item.content.entries.is_empty()
                     || item.content.prompt.as_deref().is_none_or(str::is_empty)
             })
@@ -192,5 +193,16 @@ mod tests {
                 ..reply()
             })
             .is_err());
+
+        let corrupt = CommunityResource {
+            id: Uuid::nil(),
+            ..reply()
+        };
+        std::fs::write(
+            root.path().join("files/CommunityLibrary.json"),
+            serde_json::to_vec(&[corrupt]).unwrap(),
+        )
+        .unwrap();
+        assert!(store.load().is_err(), "nil publication IDs are not usable");
     }
 }
