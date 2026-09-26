@@ -2655,6 +2655,33 @@ fn the_full_list_holds_what_paging_would_have_reached() {
 }
 
 #[test]
+fn full_list_does_not_reorder_after_generation_identity_is_exhausted() {
+    let mut runtime = withholding_runtime(12, 8, 5);
+    runtime.focus(true).unwrap();
+    type_key(&mut runtime);
+    runtime.generation = u64::MAX;
+    let before = runtime.view();
+
+    // Releasing the withheld tail would reorder seats but cannot allocate a new
+    // generation. Keep the published IDs and their seat mapping stable instead.
+    let full = runtime.all_candidates();
+    assert_eq!(full.generation, u64::MAX);
+    assert_eq!(full.candidates.len(), 12);
+    assert_eq!(
+        full.candidates
+            .iter()
+            .take(before.candidates.len())
+            .map(|candidate| candidate.text.as_str())
+            .collect::<Vec<_>>(),
+        before
+            .candidates
+            .iter()
+            .map(|candidate| candidate.text.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn expansion_that_fills_the_current_page_does_not_advance_past_it() {
     // Three offered is a single short page. Asking for the next one has nowhere to go, so the
     // arrivals fill this page instead - advancing would step straight over them.

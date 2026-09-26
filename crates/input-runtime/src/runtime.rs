@@ -496,9 +496,18 @@ impl<E: InputEngine> Runtime<E> {
     /// quietly showing the first tranche. Release them here too: this call is the request for all of
     /// them. A refusal is not fatal; the caller still gets whatever the generation already holds.
     pub fn all_candidates(&mut self) -> CandidateSnapshot {
+        // Candidate IDs are tied to the generation.  Once that identity space is
+        // exhausted we cannot publish a reordered snapshot safely: advancing would
+        // fail and retaining the old generation would let an ID from the previous
+        // seat select a different candidate.  Keep the currently published view
+        // stable; callers can still inspect the candidates already released.
+        if self.generation == u64::MAX {
+            return self.all_candidates_cached();
+        }
         // The released tail reorders the list, so the page's IDs must not keep selecting by seat.
         if self.expand_cached_candidates().unwrap_or(false) {
-            let _ = self.advance();
+            // `generation == u64::MAX` was handled above, so this cannot fail.
+            debug_assert!(self.advance().is_ok());
         }
         self.all_candidates_cached()
     }
