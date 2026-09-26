@@ -140,6 +140,9 @@ impl CustomSkinLibraryStore {
         name: &str,
         design: TouchKeyboardSkinDesign,
     ) -> Result<SavedTouchKeyboardSkin, CustomSkinLibraryError> {
+        if id.is_nil() {
+            return Err(CustomSkinLibraryError::Invalid);
+        }
         let _lock = self.lock()?;
         let mut items = self.read_locked()?;
         if let Some(item) = items.iter_mut().find(|item| item.id == id) {
@@ -201,6 +204,9 @@ impl CustomSkinLibraryStore {
         let mut ids = BTreeSet::new();
         let mut names = BTreeSet::new();
         for item in &mut items {
+            if item.id.is_nil() {
+                return Err(CustomSkinLibraryError::Invalid);
+            }
             item.name = normalized_name(&item.name)?;
             item.design = item.design.clone().normalized();
             if !ids.insert(item.id) || !names.insert(item.name.clone()) {
@@ -370,6 +376,10 @@ mod tests {
         assert_eq!(refreshed.name, "星空 (2)");
         assert_eq!(refreshed.design.background, 0x445566);
         assert_eq!(store.load().unwrap().len(), 2);
+        assert!(matches!(
+            store.import_download(Uuid::nil(), "无效作品", TouchKeyboardSkinDesign::default()),
+            Err(CustomSkinLibraryError::Invalid)
+        ));
     }
 
     #[test]
@@ -419,6 +429,14 @@ mod tests {
             })
             .is_err());
         assert_eq!(fs::read(store.path()).unwrap(), before);
+
+        let nil_id = vec![SavedTouchKeyboardSkin {
+            id: Uuid::nil(),
+            name: "损坏皮肤".into(),
+            design: TouchKeyboardSkinDesign::default(),
+        }];
+        fs::write(store.path(), serde_json::to_vec(&nil_id).unwrap()).unwrap();
+        assert!(matches!(store.load(), Err(CustomSkinLibraryError::Invalid)));
     }
 
     #[test]
