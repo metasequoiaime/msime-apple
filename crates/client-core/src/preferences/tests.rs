@@ -16,6 +16,20 @@ fn voice_commit_mode_defaults_for_legacy_documents() {
 }
 
 #[test]
+fn oversized_preference_documents_are_rejected_before_loading() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(MAX_DOCUMENT_BYTES + 1)
+        .unwrap();
+    assert!(matches!(
+        PreferencesStore::new(directory.path()).load(),
+        Err(PreferencesError::DocumentTooLarge)
+    ));
+}
+
+#[test]
 fn doubao_auth_mode_defaults_and_roundtrips() {
     let mut value = serde_json::to_value(Preferences::default()).unwrap();
     value["voice_input"]

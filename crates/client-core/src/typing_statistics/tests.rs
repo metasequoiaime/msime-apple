@@ -6,6 +6,20 @@ use super::*;
 use std::sync::Arc;
 
 #[test]
+fn oversized_document_is_rejected_before_loading() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("typing-statistics.json");
+    std::fs::File::create(path)
+        .unwrap()
+        .set_len(MAX_DOCUMENT_BYTES + 1)
+        .unwrap();
+    assert!(matches!(
+        TypingStatisticsStore::new(directory.path()).load(),
+        Err(TypingStatisticsError::InvalidDocument)
+    ));
+}
+
+#[test]
 fn records_graphemes_categories_and_sources_without_text() {
     let directory = tempfile::tempdir().unwrap();
     let store = TypingStatisticsStore::new(directory.path());

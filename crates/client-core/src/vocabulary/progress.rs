@@ -13,7 +13,7 @@ use super::wordbook::{self, Wordbook};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// The largest progress document that will be read.
@@ -317,8 +317,8 @@ impl VocabularyProgressStore {
 
     fn read_locked(&self) -> Result<VocabularyProgress, VocabularyProgressError> {
         let path = self.path();
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
+        let bytes = match File::open(&path) {
+            Ok(file) => read_bounded_document(file)?,
             // A missing file is a fresh profile. A damaged one is not, and is never overwritten
             // below — the two cases are deliberately different.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -458,6 +458,18 @@ impl VocabularyProgressStore {
     }
 }
 
+fn read_bounded_document(file: File) -> Result<Vec<u8>, VocabularyProgressError> {
+    if file.metadata()?.len() > MAX_DOCUMENT_BYTES {
+        return Err(VocabularyProgressError::InvalidDocument);
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
+        return Err(VocabularyProgressError::InvalidDocument);
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,6 +563,19 @@ mod tests {
             br#"{"cards":{"cet-4":{"x":{"dueDate":1}}}}"#,
             "a damaged document is never replaced with defaults"
         );
+    }
+
+    #[test]
+    fn an_oversized_document_is_rejected_before_loading() {
+        let (directory, store) = store();
+        File::create(directory.path().join("vocabulary-progress.json"))
+            .unwrap()
+            .set_len(MAX_DOCUMENT_BYTES + 1)
+            .unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(VocabularyProgressError::InvalidDocument)
+        ));
     }
 
     #[test]

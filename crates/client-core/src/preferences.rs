@@ -5,8 +5,13 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+/// The largest preference document accepted by the shared host boundary. This
+/// covers a validated custom skin photo while preventing a damaged local file
+/// from forcing an unbounded allocation during startup or recovery.
+const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1913,6 +1918,8 @@ pub enum PreferencesError {
     UnsupportedFormat,
     #[error("preferences revision exhausted")]
     RevisionExhausted,
+    #[error("preferences document is too large")]
+    DocumentTooLarge,
     #[error("preferences storage failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("invalid preferences document: {0}")]
@@ -1943,6 +1950,18 @@ enum RecoveryScope {
 
 pub struct PreferencesStore {
     directory: PathBuf,
+}
+
+fn read_bounded_document(file: File, maximum: u64) -> Result<Vec<u8>, PreferencesError> {
+    if file.metadata()?.len() > maximum {
+        return Err(PreferencesError::DocumentTooLarge);
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > maximum {
+        return Err(PreferencesError::DocumentTooLarge);
+    }
+    Ok(bytes)
 }
 
 impl PreferencesStore {
@@ -1979,8 +1998,9 @@ impl PreferencesStore {
     }
 
     fn read_locked(&self) -> Result<PreferencesSnapshot, PreferencesError> {
-        let bytes = match fs::read(self.path()) {
-            Ok(bytes) => bytes,
+        let path = self.path();
+        let bytes = match File::open(&path) {
+            Ok(file) => read_bounded_document(file, MAX_DOCUMENT_BYTES)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(PreferencesSnapshot::default())
             }
@@ -2117,7 +2137,7 @@ impl PreferencesStore {
             Err(PreferencesError::Io(error)) => return Err(PreferencesError::Io(error)),
             Err(failure) => failure,
         };
-        let bytes = fs::read(self.path())?;
+        let bytes = read_bounded_document(File::open(self.path())?, MAX_DOCUMENT_BYTES)?;
         let document = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
         if scope == RecoveryScope::Malformed && document.is_some() {
             return Err(failure);

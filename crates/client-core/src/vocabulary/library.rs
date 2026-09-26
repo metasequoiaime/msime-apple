@@ -13,7 +13,7 @@
 use super::wordbook::{self, Wordbook, WordbookEntry};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// The most books one library may hold.
@@ -97,8 +97,8 @@ impl WordbookLibrary {
     }
 
     fn read_index_locked(&self) -> Result<LibraryIndex, WordbookLibraryError> {
-        let bytes = match fs::read(self.index_path()) {
-            Ok(bytes) => bytes,
+        let bytes = match File::open(self.index_path()) {
+            Ok(file) => read_bounded_document(file, MAX_INDEX_BYTES)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(LibraryIndex::default());
             }
@@ -149,8 +149,8 @@ impl WordbookLibrary {
             return Err(WordbookLibraryError::InvalidWordbook);
         }
         let _lock = self.lock()?;
-        let bytes = match fs::read(self.book_path(id)) {
-            Ok(bytes) => bytes,
+        let bytes = match File::open(self.book_path(id)) {
+            Ok(file) => read_bounded_document(file, MAX_BOOK_BYTES)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
         };
@@ -238,6 +238,18 @@ impl WordbookLibrary {
             Err(error) => Err(error.into()),
         }
     }
+}
+
+fn read_bounded_document(file: File, maximum: u64) -> Result<Vec<u8>, WordbookLibraryError> {
+    if file.metadata()?.len() > maximum {
+        return Err(WordbookLibraryError::InvalidWordbook);
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > maximum {
+        return Err(WordbookLibraryError::InvalidWordbook);
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -377,6 +389,20 @@ mod tests {
 
         // The user imported it; it must not vanish from the picker with no explanation.
         assert!(library.load("user-1").is_err());
+    }
+
+    #[test]
+    fn an_oversized_book_is_rejected_before_loading() {
+        let (_directory, library) = library();
+        fs::create_dir_all(library.directory()).unwrap();
+        File::create(library.directory().join("user-1.json"))
+            .unwrap()
+            .set_len(MAX_BOOK_BYTES + 1)
+            .unwrap();
+        assert!(matches!(
+            library.load("user-1"),
+            Err(WordbookLibraryError::InvalidWordbook)
+        ));
     }
 
     #[test]
